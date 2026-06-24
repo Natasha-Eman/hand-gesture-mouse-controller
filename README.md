@@ -5,6 +5,7 @@ Built as a personal AI project by Natasha Eman, EE Student at FAST-NUCES.
 
 ## 🎥 Demo
 [Watch Demo Video on LinkedIn](https://www.linkedin.com/in/Natasha-Eman)
+https://www.linkedin.com/posts/natasha-eman-368531329_python-opencv-mediapipe-ugcPost-7475565405491863552-vAia/?utm_source=share&utm_medium=member_desktop&rcm=ACoAAFLWh8AB881xCHt-oHG5zIjIhjc1bwAqc8c
 
 ## 🛠️ Tech Stack
 - Python
