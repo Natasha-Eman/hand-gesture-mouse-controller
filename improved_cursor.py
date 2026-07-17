@@ -14,7 +14,7 @@ MODEL_PATH = "D:/Python/Media Pipe/hand_landmarker.task"
 
 SMOOTHING = 10
 
-PINCH_THRESHOLD = 35
+PINCH_THRESHOLD_RATIO = 0.4   # pinch distance must be less than 40% of hand scale
 PINCH_REQUIRED = 3
 
 pyautogui.FAILSAFE = False
@@ -105,8 +105,8 @@ detector = vision.HandLandmarker.create_from_options(options)
 
 cap = cv2.VideoCapture(0)
 
-cap.set(cv2.CAP_PROP_FRAME_WIDTH,1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT,720)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH,640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT,480)
 
 
 
@@ -328,57 +328,56 @@ while True:
 
 
 
-        # ================= PINCH ================= #
-
+                # ================= PINCH ================= #
 
         distance = math.sqrt(
-            (ix-tx)**2 +
-            (iy-ty)**2
+            (ix - tx) ** 2 +
+            (iy - ty) ** 2
         )
 
+        # Hand-scale reference: wrist (0) to middle-finger MCP (9)
+        wrist = hand[0]
+        middle_mcp = hand[9]
 
+        hand_scale = math.sqrt(
+            (wrist.x * w - middle_mcp.x * w) ** 2 +
+            (wrist.y * h - middle_mcp.y * h) ** 2
+        )
+
+        # Avoid divide-by-zero
+        if hand_scale == 0:
+            hand_scale = 1
+
+        normalized_distance = distance / hand_scale
 
         fingers = count_fingers(hand)
 
-
-
-        if distance < PINCH_THRESHOLD:
-
+        if normalized_distance < PINCH_THRESHOLD_RATIO:
 
             pinch_frames += 1
 
-
             if pinch_frames >= PINCH_REQUIRED:
 
-
                 if not holding:
-
                     pyautogui.mouseDown()
-                    holding=True
+                    holding = True
 
-
-                status="HOLDING"
-                status_color=(0,0,255)
-
-
-
+                status = "HOLDING"
+                status_color = (0, 0, 255)
 
         else:
 
-
-            pinch_frames=0
-
+            pinch_frames = 0
 
             if holding:
-
                 pyautogui.mouseUp()
-                holding=False
+                holding = False
 
+            status = "RELEASED"
+            status_color = (0, 255, 0)
+        
 
-
-            status="RELEASED"
-            status_color=(0,255,0)
-
+          
 
 
 
@@ -399,7 +398,7 @@ while True:
 
         cv2.putText(
             frame,
-            f"Pinch Distance: {int(distance)}",
+            f"Pinch Ratio: {normalized_distance:.2f}",
             (30,150),
             cv2.FONT_HERSHEY_SIMPLEX,
             .8,
@@ -443,7 +442,6 @@ while True:
             (0,0,255),
             2
         )
-
 
 
 

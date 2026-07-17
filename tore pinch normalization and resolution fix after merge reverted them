@@ -1,0 +1,124 @@
+[1mdiff --git a/improved_cursor.py b/improved_cursor.py[m
+[1mindex f1ab1df..2f5a636 100644[m
+[1m--- a/improved_cursor.py[m
+[1m+++ b/improved_cursor.py[m
+[36m@@ -14,7 +14,7 @@[m [mMODEL_PATH = "D:/Python/Media Pipe/hand_landmarker.task"[m
+ [m
+ SMOOTHING = 10[m
+ [m
+[31m-PINCH_THRESHOLD = 35[m
+[32m+[m[32mPINCH_THRESHOLD_RATIO = 0.4   # pinch distance must be less than 40% of hand scale[m
+ PINCH_REQUIRED = 3[m
+ [m
+ pyautogui.FAILSAFE = False[m
+[36m@@ -105,8 +105,8 @@[m [mdetector = vision.HandLandmarker.create_from_options(options)[m
+ [m
+ cap = cv2.VideoCapture(0)[m
+ [m
+[31m-cap.set(cv2.CAP_PROP_FRAME_WIDTH,1280)[m
+[31m-cap.set(cv2.CAP_PROP_FRAME_HEIGHT,720)[m
+[32m+[m[32mcap.set(cv2.CAP_PROP_FRAME_WIDTH,640)[m
+[32m+[m[32mcap.set(cv2.CAP_PROP_FRAME_HEIGHT,480)[m
+ [m
+ [m
+ [m
+[36m@@ -328,57 +328,56 @@[m [mwhile True:[m
+ [m
+ [m
+ [m
+[31m-        # ================= PINCH ================= #[m
+[31m-[m
+[32m+[m[32m                # ================= PINCH ================= #[m
+ [m
+         distance = math.sqrt([m
+[31m-            (ix-tx)**2 +[m
+[31m-            (iy-ty)**2[m
+[32m+[m[32m            (ix - tx) ** 2 +[m
+[32m+[m[32m            (iy - ty) ** 2[m
+         )[m
+ [m
+[32m+[m[32m        # Hand-scale reference: wrist (0) to middle-finger MCP (9)[m
+[32m+[m[32m        wrist = hand[0][m
+[32m+[m[32m        middle_mcp = hand[9][m
+ [m
+[32m+[m[32m        hand_scale = math.sqrt([m
+[32m+[m[32m            (wrist.x * w - middle_mcp.x * w) ** 2 +[m
+[32m+[m[32m            (wrist.y * h - middle_mcp.y * h) ** 2[m
+[32m+[m[32m        )[m
+ [m
+[31m-        fingers = count_fingers(hand)[m
+[31m-[m
+[32m+[m[32m        # Avoid divide-by-zero[m
+[32m+[m[32m        if hand_scale == 0:[m
+[32m+[m[32m            hand_scale = 1[m
+ [m
+[32m+[m[32m        normalized_distance = distance / hand_scale[m
+ [m
+[31m-        if distance < PINCH_THRESHOLD:[m
+[32m+[m[32m        fingers = count_fingers(hand)[m
+ [m
+[32m+[m[32m        if normalized_distance < PINCH_THRESHOLD_RATIO:[m
+ [m
+             pinch_frames += 1[m
+ [m
+[31m-[m
+             if pinch_frames >= PINCH_REQUIRED:[m
+ [m
+[31m-[m
+                 if not holding:[m
+[31m-[m
+                     pyautogui.mouseDown()[m
+[31m-                    holding=True[m
+[31m-[m
+[31m-[m
+[31m-                status="HOLDING"[m
+[31m-                status_color=(0,0,255)[m
+[31m-[m
+[31m-[m
+[32m+[m[32m                    holding = True[m
+ [m
+[32m+[m[32m                status = "HOLDING"[m
+[32m+[m[32m                status_color = (0, 0, 255)[m
+ [m
+         else:[m
+ [m
+[31m-[m
+[31m-            pinch_frames=0[m
+[31m-[m
+[32m+[m[32m            pinch_frames = 0[m
+ [m
+             if holding:[m
+[31m-[m
+                 pyautogui.mouseUp()[m
+[31m-                holding=False[m
+[31m-[m
+[32m+[m[32m                holding = False[m
+ [m
+[32m+[m[32m            status = "RELEASED"[m
+[32m+[m[32m            status_color = (0, 255, 0)[m
+[32m+[m[41m        [m
+ [m
+[31m-            status="RELEASED"[m
+[31m-            status_color=(0,255,0)[m
+[31m-[m
+[32m+[m[41m          [m
+ [m
+ [m
+ [m
+[36m@@ -399,7 +398,7 @@[m [mwhile True:[m
+ [m
+         cv2.putText([m
+             frame,[m
+[31m-            f"Pinch Distance: {int(distance)}",[m
+[32m+[m[32m            f"Pinch Ratio: {normalized_distance:.2f}",[m
+             (30,150),[m
+             cv2.FONT_HERSHEY_SIMPLEX,[m
+             .8,[m
+[36m@@ -446,7 +445,6 @@[m [mwhile True:[m
+ [m
+ [m
+ [m
+[31m-[m
+     # ================= FPS ================= #[m
+ [m
+     now=time.time()[m
