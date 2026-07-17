@@ -174,6 +174,12 @@ while True:
                 non_palm_time = None
 
             if scroll_mode:
+
+                # keep cursor tracking in sync during scroll mode too
+                target_x=np.interp(index.x, [0.15,0.85], [0,SCREEN_W])
+                target_y=np.interp(index.y, [0.15,0.85], [0,SCREEN_H])
+                prev_x = prev_x + (target_x-prev_x)/SMOOTHING
+                prev_y = prev_y + (target_y-prev_y)/SMOOTHING
                 offset = wrist_point.y - scroll_neutral_y
 
                 if abs(offset) > DEAD_ZONE:
@@ -217,6 +223,12 @@ while True:
                 # ---- FIST: right-click, once per fist ----
                 palm_hold_start_time = None
                 fist_frames += 1
+
+                # keep cursor tracking in sync so it doesn't snap when returning to normal
+                target_x=np.interp(index.x, [0.15,0.85], [0,SCREEN_W])
+                target_y=np.interp(index.y, [0.15,0.85], [0,SCREEN_H])
+                prev_x = prev_x + (target_x-prev_x)/SMOOTHING
+                prev_y = prev_y + (target_y-prev_y)/SMOOTHING
 
                 if fist_frames >= FIST_REQUIRED and not fist_active:
                     pyautogui.rightClick()
