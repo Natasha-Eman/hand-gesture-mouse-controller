@@ -10,7 +10,7 @@ import math
 
 # ================= SETTINGS ================= #
 
-MODEL_PATH = "D:/Media Pipe/hand_landmarker.task"
+MODEL_PATH = "D:/Python/Media Pipe/hand_landmarker.task"
 
 SMOOTHING = 10
 
