@@ -503,9 +503,10 @@ class TitanHUD(QWidget):
 
     def closeEvent(self, event):
         self.gesture_thread.stop()
-        self.gesture_thread.wait()
+        if not self.gesture_thread.wait(3000):   # wait max 3 seconds
+            self.gesture_thread.terminate()      # force-kill if still stuck
+            self.gesture_thread.wait()
         event.accept()
-
 
 app = QApplication(sys.argv)
 hud = TitanHUD()
