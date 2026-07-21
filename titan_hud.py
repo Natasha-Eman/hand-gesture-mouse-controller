@@ -7,12 +7,19 @@ import pyautogui
 import numpy as np
 import time
 import math
+import pyaudio
+import wave
+import winsound
+import subprocess
+import psutil
 
 from PySide6.QtWidgets import (
     QApplication, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QPushButton
 )
 from PySide6.QtCore import Qt, QThread, Signal, QPoint
 from PySide6.QtGui import QImage, QPixmap
+from openwakeword.model import Model as OWWModel
+from faster_whisper import WhisperModel
 
 
 # ================= SETTINGS ================= #
@@ -397,7 +404,123 @@ class GestureThread(QThread):
         self.running = False
         
       
+# ================= VOICE THREAD ================= #
 
+class VoiceThread(QThread):
+    voice_status = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.running = True
+
+    def handle_command(self, text):
+        text = text.lower()
+
+        if "battery" in text:
+            battery = psutil.sensors_battery()
+            if battery:
+                msg = f"Battery is at {int(battery.percent)}%"
+            else:
+                msg = "Battery info not available"
+
+        elif "volume up" in text:
+            for _ in range(5):
+                pyautogui.press("volumeup")
+            msg = "Volume increased"
+
+        elif "volume down" in text:
+            for _ in range(5):
+                pyautogui.press("volumedown")
+            msg = "Volume decreased"
+
+        elif "mute" in text:
+            pyautogui.press("volumemute")
+            msg = "Muted"
+
+        elif "chrome" in text:
+            subprocess.Popen(["start", "chrome"], shell=True)
+            msg = "Opening Chrome"
+
+        elif "notepad" in text:
+            subprocess.Popen(["notepad.exe"])
+            msg = "Opening Notepad"
+
+        elif "scroll up" in text:
+            pyautogui.scroll(300)
+            msg = "Scrolled up"
+
+        elif "scroll down" in text:
+            pyautogui.scroll(-300)
+            msg = "Scrolled down"
+
+        else:
+            msg = f"No matching command for: \"{text}\""
+
+        self.voice_status.emit(f"Heard: \"{text}\" → {msg}")
+
+    def run(self):
+        owwModel = OWWModel(wakeword_models=["hey_jarvis"])
+        whisper_model = WhisperModel("small.en", device="cpu", compute_type="int8")
+
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 16000
+        CHUNK = 1280
+        RECORD_SECONDS = 4
+        COOLDOWN_SECONDS = 2
+
+        audio = pyaudio.PyAudio()
+        stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE,
+                             input=True, frames_per_buffer=CHUNK)
+
+        self.voice_status.emit("Listening for 'Hey Jarvis'...")
+
+        last_trigger_time = 0
+        armed = True
+
+        while self.running:
+            audio_chunk = np.frombuffer(stream.read(CHUNK, exception_on_overflow=False), dtype=np.int16)
+            prediction = owwModel.predict(audio_chunk)
+
+            now = time.time()
+
+            for wakeword, score in prediction.items():
+                if score > 0.5 and armed and (now - last_trigger_time) > COOLDOWN_SECONDS:
+                    armed = False
+
+                    winsound.Beep(1000, 150)
+                    self.voice_status.emit("Listening for command...")
+
+                    frames = []
+                    num_chunks = int(RATE / CHUNK * RECORD_SECONDS)
+                    for _ in range(num_chunks):
+                        data = stream.read(CHUNK, exception_on_overflow=False)
+                        frames.append(data)
+
+                    wf = wave.open("command.wav", "wb")
+                    wf.setnchannels(CHANNELS)
+                    wf.setsampwidth(audio.get_sample_size(FORMAT))
+                    wf.setframerate(RATE)
+                    wf.writeframes(b"".join(frames))
+                    wf.close()
+
+                    segments, _ = whisper_model.transcribe("command.wav")
+                    text = " ".join([seg.text for seg in segments]).strip()
+
+                    self.handle_command(text)
+                    winsound.Beep(1500, 100)
+
+                    last_trigger_time = time.time()
+
+                elif score < 0.2:
+                    armed = True
+
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
+
+    def stop(self):
+        self.running = False
 
 # ================= HUD WINDOW ================= #
 
@@ -438,6 +561,9 @@ class TitanHUD(QWidget):
         self.status_label = QLabel("Status: Starting...")
         self.fingers_label = QLabel("Fingers: -")
         self.pinch_label = QLabel("Pinch Ratio: -")
+        self.voice_label = QLabel("Voice: Starting...")
+        self.voice_label.setStyleSheet("color: #ffaa00; font-size: 14px;")
+        self.voice_label.setWordWrap(True)
 
         for lbl in (self.status_label, self.fingers_label, self.pinch_label):
             lbl.setStyleSheet("color: white; font-size: 16px;")
@@ -448,6 +574,7 @@ class TitanHUD(QWidget):
         outer_layout.addWidget(self.status_label)
         outer_layout.addWidget(self.fingers_label)
         outer_layout.addWidget(self.pinch_label)
+        outer_layout.addWidget(self.voice_label)
 
         self.setLayout(outer_layout)
         self.setStyleSheet("""
@@ -463,6 +590,9 @@ class TitanHUD(QWidget):
         self.gesture_thread.status_updated.connect(self.update_status)
         self.gesture_thread.mode_changed.connect(self.update_mode_label)
         self.gesture_thread.start()
+        self.voice_thread = VoiceThread()
+        self.voice_thread.voice_status.connect(self.update_voice_status)
+        self.voice_thread.start()
 
     def update_frame(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -472,6 +602,9 @@ class TitanHUD(QWidget):
             self.camera_label.width(), self.camera_label.height(), Qt.KeepAspectRatio
         )
         self.camera_label.setPixmap(pixmap)
+
+    def update_voice_status(self, text):
+        self.voice_label.setText(f"Voice: {text}")
 
     def update_status(self, status, fingers, pinch_ratio):
         self.status_label.setText(f"Status: {status}")
@@ -503,9 +636,9 @@ class TitanHUD(QWidget):
 
     def closeEvent(self, event):
         self.gesture_thread.stop()
-        if not self.gesture_thread.wait(3000):   # wait max 3 seconds
-            self.gesture_thread.terminate()      # force-kill if still stuck
-            self.gesture_thread.wait()
+        self.gesture_thread.wait()
+        self.voice_thread.stop()
+        self.voice_thread.wait(2000)
         event.accept()
 
 app = QApplication(sys.argv)
