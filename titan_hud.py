@@ -113,293 +113,296 @@ class GestureThread(QThread):
         self.mode_changed.emit(mode)
 
     def run(self):
-        hand_base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
-        hand_options = vision.HandLandmarkerOptions(
-            base_options=hand_base_options, num_hands=1
-        )
-        hand_detector = vision.HandLandmarker.create_from_options(hand_options)
+        try:
+            hand_base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+            hand_options = vision.HandLandmarkerOptions(
+                base_options=hand_base_options, num_hands=1
+            )
+            hand_detector = vision.HandLandmarker.create_from_options(hand_options)
 
-        face_detector = None   # lazy-loaded on first switch to face mode
+            face_detector = None   # lazy-loaded on first switch to face mode
 
 
+            
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-       
-        
+            
 
-        prev_x = 0
-        prev_y = 0
-        holding = False
-        pinch_frames = 0
-        fist_frames = 0
-        fist_active = False
-        scroll_mode = False
-        palm_hold_start_time = None
-        scroll_neutral_y = None
-        non_palm_time = None
-        previous_time = time.time()
+            prev_x = 0
+            prev_y = 0
+            holding = False
+            pinch_frames = 0
+            fist_frames = 0
+            fist_active = False
+            scroll_mode = False
+            palm_hold_start_time = None
+            scroll_neutral_y = None
+            non_palm_time = None
+            previous_time = time.time()
 
-        while self.running:
+            while self.running:
 
-            ret, frame = cap.read()
-            if not ret:
-                break
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            frame = cv2.flip(frame, 1)
-            h, w, _ = frame.shape
+                frame = cv2.flip(frame, 1)
+                h, w, _ = frame.shape
 
-            status = "RELEASED"
-            normalized_distance = 0.0
-            fingers = 0
-            now = time.time()
+                status = "RELEASED"
+                normalized_distance = 0.0
+                fingers = 0
+                now = time.time()
 
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
-            # ============ FACE MODE ============ #
-            if self.mode == "face":
+                # ============ FACE MODE ============ #
+                if self.mode == "face":
 
-                if face_detector is None:
-                    face_base_options = python.BaseOptions(model_asset_path=FACE_MODEL_PATH)
-                    face_options = vision.FaceLandmarkerOptions(
-                        base_options=face_base_options, num_faces=1
-                    )
-                    face_detector = vision.FaceLandmarker.create_from_options(face_options)
+                    if face_detector is None:
+                        face_base_options = python.BaseOptions(model_asset_path=FACE_MODEL_PATH)
+                        face_options = vision.FaceLandmarkerOptions(
+                            base_options=face_base_options, num_faces=1
+                        )
+                        face_detector = vision.FaceLandmarker.create_from_options(face_options)
 
-                face_results = face_detector.detect(mp_image)
+                    face_results = face_detector.detect(mp_image)
 
-                if face_results.face_landmarks:
-                    face = face_results.face_landmarks[0]
+                    if face_results.face_landmarks:
+                        face = face_results.face_landmarks[0]
 
-                    xs = [pt.x * w for pt in face]
-                    ys = [pt.y * h for pt in face]
-                    min_x, max_x = int(min(xs)), int(max(xs))
-                    min_y, max_y = int(min(ys)), int(max(ys))
+                        xs = [pt.x * w for pt in face]
+                        ys = [pt.y * h for pt in face]
+                        min_x, max_x = int(min(xs)), int(max(xs))
+                        min_y, max_y = int(min(ys)), int(max(ys))
 
-                    pad = 15
-                    min_x -= pad; min_y -= pad
-                    max_x += pad; max_y += pad
+                        pad = 15
+                        min_x -= pad; min_y -= pad
+                        max_x += pad; max_y += pad
 
-                    box_w = max_x - min_x
-                    box_h = max_y - min_y
-                    bracket_len = int(min(box_w, box_h) * 0.22)
-                    tick_len = int(bracket_len * 0.35)
-                    color = (255, 220, 0)
+                        box_w = max_x - min_x
+                        box_h = max_y - min_y
+                        bracket_len = int(min(box_w, box_h) * 0.22)
+                        tick_len = int(bracket_len * 0.35)
+                        color = (255, 220, 0)
 
-                    pulse = 0.5 + 0.5 * math.sin(now * 4)
-                    thin = 2
-                    thick_glow = 6
+                        pulse = 0.5 + 0.5 * math.sin(now * 4)
+                        thin = 2
+                        thick_glow = 6
 
-                    glow_layer = frame.copy()
+                        glow_layer = frame.copy()
 
-                    corners = [
-                        (min_x, min_y, 1, 1),
-                        (max_x, min_y, -1, 1),
-                        (min_x, max_y, 1, -1),
-                        (max_x, max_y, -1, -1),
-                    ]
-                    for cx, cy, sign_x, sign_y in corners:
-                        cv2.line(glow_layer, (cx, cy), (cx + sign_x*bracket_len, cy), color, thick_glow)
-                        cv2.line(glow_layer, (cx, cy), (cx, cy + sign_y*bracket_len), color, thick_glow)
-                        cv2.line(glow_layer, (cx + sign_x*bracket_len, cy),
-                                 (cx + sign_x*(bracket_len+tick_len), cy), color, thick_glow)
-                        cv2.line(glow_layer, (cx, cy + sign_y*bracket_len),
-                                 (cx, cy + sign_y*(bracket_len+tick_len)), color, thick_glow)
+                        corners = [
+                            (min_x, min_y, 1, 1),
+                            (max_x, min_y, -1, 1),
+                            (min_x, max_y, 1, -1),
+                            (max_x, max_y, -1, -1),
+                        ]
+                        for cx, cy, sign_x, sign_y in corners:
+                            cv2.line(glow_layer, (cx, cy), (cx + sign_x*bracket_len, cy), color, thick_glow)
+                            cv2.line(glow_layer, (cx, cy), (cx, cy + sign_y*bracket_len), color, thick_glow)
+                            cv2.line(glow_layer, (cx + sign_x*bracket_len, cy),
+                                    (cx + sign_x*(bracket_len+tick_len), cy), color, thick_glow)
+                            cv2.line(glow_layer, (cx, cy + sign_y*bracket_len),
+                                    (cx, cy + sign_y*(bracket_len+tick_len)), color, thick_glow)
 
-                    glow_layer = cv2.GaussianBlur(glow_layer, (15, 15), 0)
-                    alpha = 0.35 + 0.25 * pulse
-                    frame[:] = cv2.addWeighted(glow_layer, alpha, frame, 1 - alpha, 0)
+                        glow_layer = cv2.GaussianBlur(glow_layer, (15, 15), 0)
+                        alpha = 0.35 + 0.25 * pulse
+                        frame[:] = cv2.addWeighted(glow_layer, alpha, frame, 1 - alpha, 0)
 
-                    for cx, cy, sign_x, sign_y in corners:
-                        cv2.line(frame, (cx, cy), (cx + sign_x*bracket_len, cy), color, thin)
-                        cv2.line(frame, (cx, cy), (cx, cy + sign_y*bracket_len), color, thin)
-                        cv2.line(frame, (cx + sign_x*bracket_len, cy),
-                                 (cx + sign_x*(bracket_len+tick_len), cy), color, thin)
-                        cv2.line(frame, (cx, cy + sign_y*bracket_len),
-                                 (cx, cy + sign_y*(bracket_len+tick_len)), color, thin)
+                        for cx, cy, sign_x, sign_y in corners:
+                            cv2.line(frame, (cx, cy), (cx + sign_x*bracket_len, cy), color, thin)
+                            cv2.line(frame, (cx, cy), (cx, cy + sign_y*bracket_len), color, thin)
+                            cv2.line(frame, (cx + sign_x*bracket_len, cy),
+                                    (cx + sign_x*(bracket_len+tick_len), cy), color, thin)
+                            cv2.line(frame, (cx, cy + sign_y*bracket_len),
+                                    (cx, cy + sign_y*(bracket_len+tick_len)), color, thin)
 
-                    scan_progress = (now * 0.6) % 1.0
-                    scan_x = int(min_x + scan_progress * box_w)
-                    cv2.line(frame, (scan_x, min_y), (scan_x, max_y), (0, 255, 255), 1)
+                        scan_progress = (now * 0.6) % 1.0
+                        scan_x = int(min_x + scan_progress * box_w)
+                        cv2.line(frame, (scan_x, min_y), (scan_x, max_y), (0, 255, 255), 1)
 
-                    ncx = (min_x + max_x) // 2
-                    ncy = (min_y + max_y) // 2
-                    gap = 6
-                    arm = 14
-                    cross_color = (0, 255, 255)
-                    cv2.line(frame, (ncx - arm, ncy), (ncx - gap, ncy), cross_color, 1)
-                    cv2.line(frame, (ncx + gap, ncy), (ncx + arm, ncy), cross_color, 1)
-                    cv2.line(frame, (ncx, ncy - arm), (ncx, ncy - gap), cross_color, 1)
-                    cv2.line(frame, (ncx, ncy + arm), (ncx, ncy + gap), cross_color, 1)
-                    cv2.circle(frame, (ncx, ncy), 2, cross_color, -1)
+                        ncx = (min_x + max_x) // 2
+                        ncy = (min_y + max_y) // 2
+                        gap = 6
+                        arm = 14
+                        cross_color = (0, 255, 255)
+                        cv2.line(frame, (ncx - arm, ncy), (ncx - gap, ncy), cross_color, 1)
+                        cv2.line(frame, (ncx + gap, ncy), (ncx + arm, ncy), cross_color, 1)
+                        cv2.line(frame, (ncx, ncy - arm), (ncx, ncy - gap), cross_color, 1)
+                        cv2.line(frame, (ncx, ncy + arm), (ncx, ncy + gap), cross_color, 1)
+                        cv2.circle(frame, (ncx, ncy), 2, cross_color, -1)
 
-                    # subtle wireframe contour overlay (eyes, brows, lips, jawline)
-                    wireframe_layer = frame.copy()
-                    for start_idx, end_idx in FACE_CONTOURS:
-                        p1 = face[start_idx]
-                        p2 = face[end_idx]
-                        x1, y1 = int(p1.x * w), int(p1.y * h)
-                        x2, y2 = int(p2.x * w), int(p2.y * h)
-                        cv2.line(wireframe_layer, (x1, y1), (x2, y2), (255, 220, 0), 1)
+                        # subtle wireframe contour overlay (eyes, brows, lips, jawline)
+                        wireframe_layer = frame.copy()
+                        for start_idx, end_idx in FACE_CONTOURS:
+                            p1 = face[start_idx]
+                            p2 = face[end_idx]
+                            x1, y1 = int(p1.x * w), int(p1.y * h)
+                            x2, y2 = int(p2.x * w), int(p2.y * h)
+                            cv2.line(wireframe_layer, (x1, y1), (x2, y2), (255, 220, 0), 1)
 
-                    frame[:] = cv2.addWeighted(wireframe_layer, 0.45, frame, 0.55, 0)
+                        frame[:] = cv2.addWeighted(wireframe_layer, 0.45, frame, 0.55, 0)
 
-                    for name, idx in FACE_KEY_POINTS.items():
-                        pt = face[idx]
-                        px, py = int(pt.x * w), int(pt.y * h)
-                        cv2.circle(frame, (px, py), 3, (0, 255, 255), -1)
+                        for name, idx in FACE_KEY_POINTS.items():
+                            pt = face[idx]
+                            px, py = int(pt.x * w), int(pt.y * h)
+                            cv2.circle(frame, (px, py), 3, (0, 255, 255), -1)
 
-                    cv2.putText(frame, "FACE LOCKED", (min_x, min_y - 16),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
+                        cv2.putText(frame, "FACE LOCKED", (min_x, min_y - 16),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
 
-                    status = "FACE LOCKED"
+                        status = "FACE LOCKED"
+                    else:
+                        status = "NO FACE DETECTED"
+
+                # ============ HAND MODE ============ #
                 else:
-                    status = "NO FACE DETECTED"
 
-            # ============ HAND MODE ============ #
-            else:
+                    results = hand_detector.detect(mp_image)
 
-                results = hand_detector.detect(mp_image)
+                    if results.hand_landmarks:
 
-                if results.hand_landmarks:
+                        hand = results.hand_landmarks[0]
 
-                    hand = results.hand_landmarks[0]
+                        for point in hand:
+                            x = int(point.x * w); y = int(point.y * h)
+                            cv2.circle(frame, (x, y), 6, (255, 0, 255), -1)
 
-                    for point in hand:
-                        x = int(point.x * w); y = int(point.y * h)
-                        cv2.circle(frame, (x, y), 6, (255, 0, 255), -1)
+                        for start, end in HAND_CONNECTIONS:
+                            x1 = int(hand[start].x * w); y1 = int(hand[start].y * h)
+                            x2 = int(hand[end].x * w); y2 = int(hand[end].y * h)
+                            cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
-                    for start, end in HAND_CONNECTIONS:
-                        x1 = int(hand[start].x * w); y1 = int(hand[start].y * h)
-                        x2 = int(hand[end].x * w); y2 = int(hand[end].y * h)
-                        cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                        index = hand[8]
+                        thumb = hand[4]
+                        wrist_point = hand[0]
 
-                    index = hand[8]
-                    thumb = hand[4]
-                    wrist_point = hand[0]
+                        ix = int(index.x * w); iy = int(index.y * h)
+                        tx = int(thumb.x * w); ty = int(thumb.y * h)
 
-                    ix = int(index.x * w); iy = int(index.y * h)
-                    tx = int(thumb.x * w); ty = int(thumb.y * h)
-
-                    fingers = count_fingers(hand)
-
-                    if scroll_mode:
-                        if fingers != 5:
-                            if non_palm_time is None:
-                                non_palm_time = now
-                            elif (now - non_palm_time) * 1000 >= EXIT_HOLD_MS:
-                                scroll_mode = False
-                                scroll_neutral_y = None
-                                non_palm_time = None
-                        else:
-                            non_palm_time = None
+                        fingers = count_fingers(hand)
 
                         if scroll_mode:
-                            target_x = np.interp(index.x, [0.15, 0.85], [0, SCREEN_W])
-                            target_y = np.interp(index.y, [0.15, 0.85], [0, SCREEN_H])
-                            prev_x = prev_x + (target_x - prev_x) / SMOOTHING
-                            prev_y = prev_y + (target_y - prev_y) / SMOOTHING
-
-                            offset = wrist_point.y - scroll_neutral_y
-                            if abs(offset) > DEAD_ZONE:
-                                sign = -1 if offset > 0 else 1
-                                scroll_amount = int(sign * (offset ** 2) * SCROLL_SENSITIVITY)
-                                MAX_SCROLL_SPEED = 40
-                                scroll_amount = max(-MAX_SCROLL_SPEED, min(MAX_SCROLL_SPEED, scroll_amount))
-                                pyautogui.scroll(scroll_amount)
-
-                            status = "SCROLL MODE"
-
-                        fist_frames = 0
-                        fist_active = False
-
-                    else:
-                        if fingers == 5:
-                            if palm_hold_start_time is None:
-                                palm_hold_start_time = now
-                            elif (now - palm_hold_start_time) * 1000 >= GESTURE_HOLD_MS:
-                                scroll_mode = True
-                                scroll_neutral_y = wrist_point.y
+                            if fingers != 5:
+                                if non_palm_time is None:
+                                    non_palm_time = now
+                                elif (now - non_palm_time) * 1000 >= EXIT_HOLD_MS:
+                                    scroll_mode = False
+                                    scroll_neutral_y = None
+                                    non_palm_time = None
+                            else:
                                 non_palm_time = None
 
-                            status = "HOLD FOR SCROLL..."
+                            if scroll_mode:
+                                target_x = np.interp(index.x, [0.15, 0.85], [0, SCREEN_W])
+                                target_y = np.interp(index.y, [0.15, 0.85], [0, SCREEN_H])
+                                prev_x = prev_x + (target_x - prev_x) / SMOOTHING
+                                prev_y = prev_y + (target_y - prev_y) / SMOOTHING
+
+                                offset = wrist_point.y - scroll_neutral_y
+                                if abs(offset) > DEAD_ZONE:
+                                    sign = -1 if offset > 0 else 1
+                                    scroll_amount = int(sign * (offset ** 2) * SCROLL_SENSITIVITY)
+                                    MAX_SCROLL_SPEED = 40
+                                    scroll_amount = max(-MAX_SCROLL_SPEED, min(MAX_SCROLL_SPEED, scroll_amount))
+                                    pyautogui.scroll(scroll_amount)
+
+                                status = "SCROLL MODE"
+
                             fist_frames = 0
                             fist_active = False
-
-                        elif fingers == 0:
-                            palm_hold_start_time = None
-                            fist_frames += 1
-
-                            target_x = np.interp(index.x, [0.15, 0.85], [0, SCREEN_W])
-                            target_y = np.interp(index.y, [0.15, 0.85], [0, SCREEN_H])
-                            prev_x = prev_x + (target_x - prev_x) / SMOOTHING
-                            prev_y = prev_y + (target_y - prev_y) / SMOOTHING
-
-                            if fist_frames >= FIST_REQUIRED and not fist_active:
-                                pyautogui.rightClick()
-                                fist_active = True
-
-                            status = "FIST (Right-Click)"
 
                         else:
-                            palm_hold_start_time = None
-                            fist_frames = 0
-                            fist_active = False
+                            if fingers == 5:
+                                if palm_hold_start_time is None:
+                                    palm_hold_start_time = now
+                                elif (now - palm_hold_start_time) * 1000 >= GESTURE_HOLD_MS:
+                                    scroll_mode = True
+                                    scroll_neutral_y = wrist_point.y
+                                    non_palm_time = None
 
-                            target_x = np.interp(index.x, [0.15, 0.85], [0, SCREEN_W])
-                            target_y = np.interp(index.y, [0.15, 0.85], [0, SCREEN_H])
-                            current_x = prev_x + (target_x - prev_x) / SMOOTHING
-                            current_y = prev_y + (target_y - prev_y) / SMOOTHING
-                            pyautogui.moveTo(current_x, current_y)
-                            prev_x = current_x
-                            prev_y = current_y
+                                status = "HOLD FOR SCROLL..."
+                                fist_frames = 0
+                                fist_active = False
 
-                            distance = math.sqrt((ix - tx) ** 2 + (iy - ty) ** 2)
-                            middle_mcp = hand[9]
-                            hand_scale = math.sqrt(
-                                (wrist_point.x * w - middle_mcp.x * w) ** 2 +
-                                (wrist_point.y * h - middle_mcp.y * h) ** 2
-                            )
-                            if hand_scale == 0:
-                                hand_scale = 1
-                            normalized_distance = distance / hand_scale
+                            elif fingers == 0:
+                                palm_hold_start_time = None
+                                fist_frames += 1
 
-                            if normalized_distance < PINCH_THRESHOLD_RATIO:
-                                pinch_frames += 1
-                                if pinch_frames >= PINCH_REQUIRED:
-                                    if not holding:
-                                        pyautogui.mouseDown()
-                                        holding = True
-                                    status = "HOLDING"
+                                target_x = np.interp(index.x, [0.15, 0.85], [0, SCREEN_W])
+                                target_y = np.interp(index.y, [0.15, 0.85], [0, SCREEN_H])
+                                prev_x = prev_x + (target_x - prev_x) / SMOOTHING
+                                prev_y = prev_y + (target_y - prev_y) / SMOOTHING
+
+                                if fist_frames >= FIST_REQUIRED and not fist_active:
+                                    pyautogui.rightClick()
+                                    fist_active = True
+
+                                status = "FIST (Right-Click)"
+
                             else:
-                                pinch_frames = 0
-                                if holding:
-                                    pyautogui.mouseUp()
-                                    holding = False
-                                status = "RELEASED"
+                                palm_hold_start_time = None
+                                fist_frames = 0
+                                fist_active = False
 
-                else:
-                    pinch_frames = 0
-                    fist_frames = 0
-                    fist_active = False
-                    scroll_mode = False
-                    scroll_neutral_y = None
-                    palm_hold_start_time = None
-                    non_palm_time = None
-                    if holding:
-                        pyautogui.mouseUp()
-                        holding = False
-                    status = "NO HAND DETECTED"
+                                target_x = np.interp(index.x, [0.15, 0.85], [0, SCREEN_W])
+                                target_y = np.interp(index.y, [0.15, 0.85], [0, SCREEN_H])
+                                current_x = prev_x + (target_x - prev_x) / SMOOTHING
+                                current_y = prev_y + (target_y - prev_y) / SMOOTHING
+                                pyautogui.moveTo(current_x, current_y)
+                                prev_x = current_x
+                                prev_y = current_y
 
-            previous_time = now
+                                distance = math.sqrt((ix - tx) ** 2 + (iy - ty) ** 2)
+                                middle_mcp = hand[9]
+                                hand_scale = math.sqrt(
+                                    (wrist_point.x * w - middle_mcp.x * w) ** 2 +
+                                    (wrist_point.y * h - middle_mcp.y * h) ** 2
+                                )
+                                if hand_scale == 0:
+                                    hand_scale = 1
+                                normalized_distance = distance / hand_scale
 
-            self.frame_ready.emit(frame)
-            self.status_updated.emit(status, fingers, normalized_distance)
+                                if normalized_distance < PINCH_THRESHOLD_RATIO:
+                                    pinch_frames += 1
+                                    if pinch_frames >= PINCH_REQUIRED:
+                                        if not holding:
+                                            pyautogui.mouseDown()
+                                            holding = True
+                                        status = "HOLDING"
+                                else:
+                                    pinch_frames = 0
+                                    if holding:
+                                        pyautogui.mouseUp()
+                                        holding = False
+                                    status = "RELEASED"
 
-        cap.release()
+                    else:
+                        pinch_frames = 0
+                        fist_frames = 0
+                        fist_active = False
+                        scroll_mode = False
+                        scroll_neutral_y = None
+                        palm_hold_start_time = None
+                        non_palm_time = None
+                        if holding:
+                            pyautogui.mouseUp()
+                            holding = False
+                        status = "NO HAND DETECTED"
 
+                previous_time = now
+
+                self.frame_ready.emit(frame)
+                self.status_updated.emit(status, fingers, normalized_distance)
+
+            cap.release()
+
+        except Exception as e:
+            self.status_updated.emit(f"ERROR: {e}", 0, 0.0)
     def stop(self):
         self.running = False
         
@@ -459,66 +462,69 @@ class VoiceThread(QThread):
         self.voice_status.emit(f"Heard: \"{text}\" → {msg}")
 
     def run(self):
-        owwModel = OWWModel(wakeword_models=["hey_jarvis"])
-        whisper_model = WhisperModel("small.en", device="cpu", compute_type="int8")
+        try:
+            owwModel = OWWModel(wakeword_models=["hey_jarvis"])
+            whisper_model = WhisperModel("small.en", device="cpu", compute_type="int8")
 
-        FORMAT = pyaudio.paInt16
-        CHANNELS = 1
-        RATE = 16000
-        CHUNK = 1280
-        RECORD_SECONDS = 4
-        COOLDOWN_SECONDS = 2
+            FORMAT = pyaudio.paInt16
+            CHANNELS = 1
+            RATE = 16000
+            CHUNK = 1280
+            RECORD_SECONDS = 2
+            COOLDOWN_SECONDS = 2
 
-        audio = pyaudio.PyAudio()
-        stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE,
-                             input=True, frames_per_buffer=CHUNK)
+            audio = pyaudio.PyAudio()
+            stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE,
+                                input=True, frames_per_buffer=CHUNK)
 
-        self.voice_status.emit("Listening for 'Hey Jarvis'...")
+            self.voice_status.emit("Listening for 'Hey Jarvis'...")
 
-        last_trigger_time = 0
-        armed = True
+            last_trigger_time = 0
+            armed = True
 
-        while self.running:
-            audio_chunk = np.frombuffer(stream.read(CHUNK, exception_on_overflow=False), dtype=np.int16)
-            prediction = owwModel.predict(audio_chunk)
+            while self.running:
+                audio_chunk = np.frombuffer(stream.read(CHUNK, exception_on_overflow=False), dtype=np.int16)
+                prediction = owwModel.predict(audio_chunk)
 
-            now = time.time()
+                now = time.time()
 
-            for wakeword, score in prediction.items():
-                if score > 0.5 and armed and (now - last_trigger_time) > COOLDOWN_SECONDS:
-                    armed = False
+                for wakeword, score in prediction.items():
+                    if score > 0.5 and armed and (now - last_trigger_time) > COOLDOWN_SECONDS:
+                        armed = False
 
-                    winsound.Beep(1000, 150)
-                    self.voice_status.emit("Listening for command...")
+                        winsound.Beep(1000, 150)
+                        self.voice_status.emit("Listening for command...")
 
-                    frames = []
-                    num_chunks = int(RATE / CHUNK * RECORD_SECONDS)
-                    for _ in range(num_chunks):
-                        data = stream.read(CHUNK, exception_on_overflow=False)
-                        frames.append(data)
+                        frames = []
+                        num_chunks = int(RATE / CHUNK * RECORD_SECONDS)
+                        for _ in range(num_chunks):
+                            data = stream.read(CHUNK, exception_on_overflow=False)
+                            frames.append(data)
 
-                    wf = wave.open("command.wav", "wb")
-                    wf.setnchannels(CHANNELS)
-                    wf.setsampwidth(audio.get_sample_size(FORMAT))
-                    wf.setframerate(RATE)
-                    wf.writeframes(b"".join(frames))
-                    wf.close()
+                        wf = wave.open("command.wav", "wb")
+                        wf.setnchannels(CHANNELS)
+                        wf.setsampwidth(audio.get_sample_size(FORMAT))
+                        wf.setframerate(RATE)
+                        wf.writeframes(b"".join(frames))
+                        wf.close()
 
-                    segments, _ = whisper_model.transcribe("command.wav")
-                    text = " ".join([seg.text for seg in segments]).strip()
+                        segments, _ = whisper_model.transcribe("command.wav")
+                        text = " ".join([seg.text for seg in segments]).strip()
 
-                    self.handle_command(text)
-                    winsound.Beep(1500, 100)
+                        self.handle_command(text)
+                        winsound.Beep(1500, 100)
 
-                    last_trigger_time = time.time()
+                        last_trigger_time = time.time()
 
-                elif score < 0.2:
-                    armed = True
+                    elif score < 0.2:
+                        armed = True
 
-        stream.stop_stream()
-        stream.close()
-        audio.terminate()
+            stream.stop_stream()
+            stream.close()
+            audio.terminate()
 
+        except Exception as e:
+            self.voice_status.emit(f"ERROR: {e}")
     def stop(self):
         self.running = False
 
